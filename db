@@ -1,0 +1,561 @@
+/*
+ * ============================================================================
+ *  STUDENT DATABASE MANAGEMENT SYSTEM  (C++ OOP Project)
+ * ============================================================================
+ *  OOP concepts demonstrated:
+ *    1. Classes & Objects ............ Student, Person, Database<T>, DatabaseApp
+ *    2. Encapsulation ................ private/protected data + getters/setters
+ *    3. Abstraction .................. abstract class Record (pure virtual fns)
+ *    4. Inheritance .................. Record -> Person -> Student
+ *    5. Polymorphism ................. virtual display()/toCSV() + override
+ *    6. Constructors/Destructors ..... default, parameterised, virtual dtor
+ *    7. Operator Overloading ......... <<  and  ==  for Student
+ *    8. Templates (Generic class) .... Database<T>
+ *    9. Exception Handling ........... custom DatabaseException
+ *   10. File Handling ................ save/load records in a CSV file
+ *   11. STL ......................... vector, sort, find_if, lambda
+ *   12. Static members & Friend fn ... Student::getTotalCreated(), operator<<
+ *
+ *  Features: Add, View, Search (ID / Name), Update, Delete, Sort, Statistics,
+ *            Save & Load (data persists between runs).
+ *
+ *  Compile :  g++ -std=c++17 student_database_management.cpp -o studentdb
+ *  Run     :  ./studentdb        (Windows: studentdb.exe)
+ * ============================================================================
+ */
+
+#include <algorithm>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+// ---------------------------------------------------------------------------
+//  Custom exception (Exception Handling)
+// ---------------------------------------------------------------------------
+class DatabaseException : public runtime_error {
+public:
+    explicit DatabaseException(const string& msg) : runtime_error(msg) {}
+};
+
+// ---------------------------------------------------------------------------
+//  Abstract base class (Abstraction)
+//  Any type stored in the database must implement these functions.
+// ---------------------------------------------------------------------------
+class Record {
+public:
+    virtual ~Record() = default;                 // virtual destructor
+    virtual int    getId() const = 0;            // pure virtual
+    virtual void   display() const = 0;          // pure virtual
+    virtual string toCSV() const = 0;            // pure virtual
+};
+
+// ---------------------------------------------------------------------------
+//  Person : general details (Inheritance + Encapsulation)
+// ---------------------------------------------------------------------------
+class Person : public Record {
+protected:
+    int    id;
+    string name;
+    int    age;
+    string email;
+
+public:
+    Person() : id(0), name(""), age(0), email("") {}
+    Person(int id, const string& name, int age, const string& email)
+        : id(id), name(name), age(age), email(email) {}
+
+    // Getters
+    int           getId()    const override { return id; }
+    const string& getName()  const { return name; }
+    int           getAge()   const { return age; }
+    const string& getEmail() const { return email; }
+
+    // Setters
+    void setName(const string& n)  { name = n; }
+    void setAge(int a)             { age = a; }
+    void setEmail(const string& e) { email = e; }
+};
+
+// ---------------------------------------------------------------------------
+//  Student : derived from Person (Inheritance + Polymorphism)
+// ---------------------------------------------------------------------------
+class Student : public Person {
+private:
+    static const int SUBJECTS = 3;
+    string course;
+    double marks[SUBJECTS];          // marks out of 100 for each subject
+    static int totalCreated;         // static data member
+
+public:
+    Student() : Person(), course("") {
+        for (int i = 0; i < SUBJECTS; i++) marks[i] = 0;
+        totalCreated++;
+    }
+
+    Student(int id, const string& name, int age, const string& email,
+            const string& course, const double m[SUBJECTS])
+        : Person(id, name, age, email), course(course) {
+        for (int i = 0; i < SUBJECTS; i++) marks[i] = m[i];
+        totalCreated++;
+    }
+
+    Student(const Student& other) : Person(other), course(other.course) {
+        for (int i = 0; i < SUBJECTS; i++) marks[i] = other.marks[i];
+        totalCreated++;
+    }
+
+    Student& operator=(const Student& other) {
+        if (this != &other) {
+            Person::operator=(other);
+            course = other.course;
+            for (int i = 0; i < SUBJECTS; i++) marks[i] = other.marks[i];
+        }
+        return *this;
+    }
+
+    ~Student() override {}
+
+    static int getTotalCreated() { return totalCreated; }
+    static int subjectCount()    { return SUBJECTS; }
+
+    const string& getCourse() const { return course; }
+    void setCourse(const string& c) { course = c; }
+    double getMark(int i) const     { return marks[i]; }
+
+    // ----- Calculations -----
+    double total() const {
+        double t = 0;
+        for (int i = 0; i < SUBJECTS; i++) t += marks[i];
+        return t;
+    }
+    double percentage() const { return total() / SUBJECTS; }
+
+    char grade() const {
+        double p = percentage();
+        if (p >= 85) return 'A';
+        if (p >= 70) return 'B';
+        if (p >= 55) return 'C';
+        if (p >= 40) return 'D';
+        return 'F';
+    }
+    bool isPass() const { return grade() != 'F'; }
+
+    // ----- Polymorphic functions (override Record) -----
+    void display() const override {
+        cout << "\n  +---------------- STUDENT DETAILS ----------------+\n";
+        cout << "   ID         : " << id << "\n";
+        cout << "   Name       : " << name << "\n";
+        cout << "   Age        : " << age << "\n";
+        cout << "   Email      : " << email << "\n";
+        cout << "   Course     : " << course << "\n";
+        for (int i = 0; i < SUBJECTS; i++)
+            cout << "   Subject " << (i + 1) << "  : " << marks[i] << "\n";
+        cout << fixed << setprecision(2);
+        cout << "   Total      : " << total() << " / " << SUBJECTS * 100 << "\n";
+        cout << "   Percentage : " << percentage() << " %\n";
+        cout << "   Grade      : " << grade()
+             << (isPass() ? "  (PASS)" : "  (FAIL)") << "\n";
+        cout << "  +-------------------------------------------------+\n";
+        cout.unsetf(ios::fixed);
+    }
+
+    string toCSV() const override {
+        ostringstream os;
+        os << id << ',' << name << ',' << age << ',' << email << ',' << course;
+        for (int i = 0; i < SUBJECTS; i++) os << ',' << marks[i];
+        return os.str();
+    }
+
+    static Student fromCSV(const string& line) {
+        vector<string> parts;
+        string item;
+        istringstream ss(line);
+        while (getline(ss, item, ',')) parts.push_back(item);
+
+        if (parts.size() != 5 + SUBJECTS)
+            throw DatabaseException("Corrupted record: " + line);
+
+        try {
+            double m[SUBJECTS];
+            for (int i = 0; i < SUBJECTS; i++) m[i] = stod(parts[5 + i]);
+            return Student(stoi(parts[0]), parts[1], stoi(parts[2]),
+                           parts[3], parts[4], m);
+        } catch (const exception&) {
+            throw DatabaseException("Corrupted record: " + line);
+        }
+    }
+
+    // ----- Table helpers -----
+    static void printTableHeader() {
+        cout << "\n  " << string(86, '-') << "\n";
+        cout << "  " << left << setw(6) << "ID" << setw(20) << "Name" << setw(5)
+             << "Age" << setw(12) << "Course" << setw(10) << "Total"
+             << setw(10) << "Percent" << setw(7) << "Grade" << "Result\n";
+        cout << "  " << string(86, '-') << "\n";
+    }
+
+    // ----- Operator overloading -----
+    bool operator==(const Student& other) const { return id == other.id; }
+
+    friend ostream& operator<<(ostream& out, const Student& s) {
+        out << "  " << left << setw(6) << s.id << setw(20) << s.name.substr(0, 18)
+            << setw(5) << s.age << setw(12) << s.course.substr(0, 10)
+            << setw(10) << fixed << setprecision(1) << s.total()
+            << setw(10) << setprecision(2) << s.percentage() << setw(7)
+            << s.grade() << (s.isPass() ? "PASS" : "FAIL");
+        out.unsetf(ios::fixed);
+        return out;
+    }
+};
+
+int Student::totalCreated = 0;
+
+// ---------------------------------------------------------------------------
+//  Generic Database class (Templates)
+//  Works with any class derived from Record that has fromCSV().
+// ---------------------------------------------------------------------------
+template <typename T>
+class Database {
+private:
+    vector<T> records;
+    string    fileName;
+
+public:
+    explicit Database(const string& file) : fileName(file) {}
+
+    size_t size()  const { return records.size(); }
+    bool   empty() const { return records.empty(); }
+    const vector<T>& getAll() const { return records; }
+
+    bool exists(int id) const {
+        return any_of(records.begin(), records.end(),
+                      [id](const T& r) { return r.getId() == id; });
+    }
+
+    // CREATE
+    void add(const T& rec) {
+        if (exists(rec.getId()))
+            throw DatabaseException("A record with ID " +
+                                    to_string(rec.getId()) + " already exists.");
+        records.push_back(rec);
+    }
+
+    // READ
+    T& findById(int id) {
+        auto it = find_if(records.begin(), records.end(),
+                          [id](const T& r) { return r.getId() == id; });
+        if (it == records.end())
+            throw DatabaseException("No record found with ID " + to_string(id));
+        return *it;
+    }
+
+    // UPDATE (replace the record that has the same ID)
+    void update(int id, const T& newRec) {
+        T& old = findById(id);
+        old = newRec;
+    }
+
+    // DELETE
+    void remove(int id) {
+        auto it = find_if(records.begin(), records.end(),
+                          [id](const T& r) { return r.getId() == id; });
+        if (it == records.end())
+            throw DatabaseException("No record found with ID " + to_string(id));
+        records.erase(it);
+    }
+
+    // SORT using any comparator (lambda / function object)
+    template <typename Compare>
+    void sortBy(Compare cmp) { sort(records.begin(), records.end(), cmp); }
+
+    // FILE HANDLING
+    void save() const {
+        ofstream fout(fileName);
+        if (!fout) throw DatabaseException("Cannot open file for writing: " + fileName);
+        for (const T& r : records) fout << r.toCSV() << '\n';
+    }
+
+    void load() {
+        ifstream fin(fileName);
+        if (!fin) return;                       // first run: no file yet
+        records.clear();
+        string line;
+        while (getline(fin, line)) {
+            if (line.empty()) continue;
+            records.push_back(T::fromCSV(line));
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
+//  Input helpers (validated input)
+// ---------------------------------------------------------------------------
+namespace Input {
+    string readLine(const string& prompt) {
+        string s;
+        while (true) {
+            cout << prompt;
+            getline(cin, s);
+            // trim spaces
+            size_t a = s.find_first_not_of(" \t");
+            size_t b = s.find_last_not_of(" \t");
+            if (a == string::npos) { cout << "  ! Input cannot be empty.\n"; continue; }
+            s = s.substr(a, b - a + 1);
+            replace(s.begin(), s.end(), ',', ' ');   // commas would break CSV
+            return s;
+        }
+    }
+
+    int readInt(const string& prompt, int lo, int hi) {
+        while (true) {
+            string s = readLine(prompt);
+            try {
+                size_t pos;
+                int v = stoi(s, &pos);
+                if (pos == s.size() && v >= lo && v <= hi) return v;
+            } catch (const exception&) {}
+            cout << "  ! Enter a whole number between " << lo << " and " << hi << ".\n";
+        }
+    }
+
+    double readDouble(const string& prompt, double lo, double hi) {
+        while (true) {
+            string s = readLine(prompt);
+            try {
+                size_t pos;
+                double v = stod(s, &pos);
+                if (pos == s.size() && v >= lo && v <= hi) return v;
+            } catch (const exception&) {}
+            cout << "  ! Enter a number between " << lo << " and " << hi << ".\n";
+        }
+    }
+
+    string readEmail(const string& prompt) {
+        while (true) {
+            string e = readLine(prompt);
+            size_t at = e.find('@');
+            if (at != string::npos && at > 0 && e.find('.', at) != string::npos &&
+                e.find(' ') == string::npos)
+                return e;
+            cout << "  ! Enter a valid email (example: name@mail.com).\n";
+        }
+    }
+}
+
+string toLower(string s) {
+    transform(s.begin(), s.end(), s.begin(),
+              [](unsigned char c) { return static_cast<char>(tolower(c)); });
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+//  Application class : menu + all operations (Encapsulation of UI logic)
+// ---------------------------------------------------------------------------
+class DatabaseApp {
+private:
+    Database<Student> db;
+
+    void pause() {
+        cout << "\n  Press ENTER to continue...";
+        cin.get();
+    }
+
+    void printList(const vector<Student>& list) {
+        Student::printTableHeader();
+        for (const Student& s : list) cout << s << "\n";
+        cout << "  " << string(86, '-') << "\n";
+        cout << "  Total records shown: " << list.size() << "\n";
+    }
+
+    // Build a student from user input. If fixedId > 0, that ID is reused (update).
+    Student readStudent(int fixedId = 0) {
+        int id = fixedId;
+        if (id == 0) {
+            while (true) {
+                id = Input::readInt("  Enter ID (1-999999)      : ", 1, 999999);
+                if (!db.exists(id)) break;
+                cout << "  ! ID already exists. Try another.\n";
+            }
+        }
+        string name   = Input::readLine("  Enter Name               : ");
+        int    age    = Input::readInt("  Enter Age (5-100)        : ", 5, 100);
+        string email  = Input::readEmail("  Enter Email              : ");
+        string course = Input::readLine("  Enter Course (e.g. BTech): ");
+
+        double m[3];
+        for (int i = 0; i < Student::subjectCount(); i++)
+            m[i] = Input::readDouble("  Marks of Subject " + to_string(i + 1) +
+                                     " (0-100): ", 0, 100);
+        return Student(id, name, age, email, course, m);
+    }
+
+public:
+    DatabaseApp() : db("students.csv") {}
+
+    void init() {
+        try {
+            db.load();
+            cout << "  Loaded " << db.size() << " record(s) from file.\n";
+        } catch (const DatabaseException& e) {
+            cout << "  ! Load error: " << e.what() << "\n";
+        }
+    }
+
+    void addStudent() {
+        cout << "\n  ---- ADD NEW STUDENT ----\n";
+        db.add(readStudent());
+        cout << "  Student added successfully.\n";
+    }
+
+    void viewAll() {
+        if (db.empty()) { cout << "\n  Database is empty.\n"; return; }
+        printList(db.getAll());
+    }
+
+    void searchById() {
+        int id = Input::readInt("\n  Enter ID to search: ", 1, 999999);
+        db.findById(id).display();      // polymorphic call through Record
+    }
+
+    void searchByName() {
+        string key = toLower(Input::readLine("\n  Enter name (or part of it): "));
+        vector<Student> result;
+        for (const Student& s : db.getAll())
+            if (toLower(s.getName()).find(key) != string::npos) result.push_back(s);
+
+        if (result.empty()) cout << "  No matching student found.\n";
+        else printList(result);
+    }
+
+    void updateStudent() {
+        int id = Input::readInt("\n  Enter ID to update: ", 1, 999999);
+        db.findById(id).display();
+        cout << "\n  Enter the NEW details (ID stays the same):\n";
+        db.update(id, readStudent(id));
+        cout << "  Record updated successfully.\n";
+    }
+
+    void deleteStudent() {
+        int id = Input::readInt("\n  Enter ID to delete: ", 1, 999999);
+        db.findById(id).display();
+        string ans = toLower(Input::readLine("  Are you sure? (y/n): "));
+        if (ans == "y" || ans == "yes") {
+            db.remove(id);
+            cout << "  Record deleted.\n";
+        } else {
+            cout << "  Deletion cancelled.\n";
+        }
+    }
+
+    void sortRecords() {
+        if (db.empty()) { cout << "\n  Database is empty.\n"; return; }
+        cout << "\n  Sort by:\n   1. ID\n   2. Name (A-Z)\n"
+             << "   3. Percentage (high to low)\n   4. Age\n";
+        int ch = Input::readInt("  Choice: ", 1, 4);
+
+        switch (ch) {
+            case 1: db.sortBy([](const Student& a, const Student& b) { return a.getId() < b.getId(); }); break;
+            case 2: db.sortBy([](const Student& a, const Student& b) { return toLower(a.getName()) < toLower(b.getName()); }); break;
+            case 3: db.sortBy([](const Student& a, const Student& b) { return a.percentage() > b.percentage(); }); break;
+            case 4: db.sortBy([](const Student& a, const Student& b) { return a.getAge() < b.getAge(); }); break;
+        }
+        printList(db.getAll());
+    }
+
+    void statistics() {
+        if (db.empty()) { cout << "\n  Database is empty.\n"; return; }
+        const vector<Student>& all = db.getAll();
+
+        const Student* top = &all[0];
+        const Student* low = &all[0];
+        double sum = 0;
+        int pass = 0, g[5] = {0, 0, 0, 0, 0};   // A B C D F
+
+        for (const Student& s : all) {
+            if (s.percentage() > top->percentage()) top = &s;
+            if (s.percentage() < low->percentage()) low = &s;
+            sum += s.percentage();
+            if (s.isPass()) pass++;
+            switch (s.grade()) {
+                case 'A': g[0]++; break; case 'B': g[1]++; break;
+                case 'C': g[2]++; break; case 'D': g[3]++; break;
+                default:  g[4]++;
+            }
+        }
+
+        cout << "\n  ========== DATABASE STATISTICS ==========\n";
+        cout << "  Total students      : " << all.size() << "\n";
+        cout << fixed << setprecision(2);
+        cout << "  Class average       : " << sum / all.size() << " %\n";
+        cout << "  Topper              : " << top->getName() << " (" << top->percentage() << " %)\n";
+        cout << "  Lowest scorer       : " << low->getName() << " (" << low->percentage() << " %)\n";
+        cout << "  Pass / Fail         : " << pass << " / " << all.size() - pass << "\n";
+        cout << "  Pass percentage     : " << (100.0 * pass / all.size()) << " %\n";
+        cout << "  Grades  A:" << g[0] << "  B:" << g[1] << "  C:" << g[2]
+             << "  D:" << g[3] << "  F:" << g[4] << "\n";
+        cout << "  Objects created (static counter): " << Student::getTotalCreated() << "\n";
+        cout << "  =========================================\n";
+        cout.unsetf(ios::fixed);
+    }
+
+    void saveToFile() {
+        db.save();
+        cout << "  Saved " << db.size() << " record(s) to file.\n";
+    }
+
+    void run() {
+        init();
+        while (true) {
+            cout << "\n  ============================================\n"
+                 << "       STUDENT DATABASE MANAGEMENT SYSTEM\n"
+                 << "  ============================================\n"
+                 << "   1. Add Student\n"
+                 << "   2. View All Students\n"
+                 << "   3. Search by ID\n"
+                 << "   4. Search by Name\n"
+                 << "   5. Update Student\n"
+                 << "   6. Delete Student\n"
+                 << "   7. Sort Records\n"
+                 << "   8. Statistics\n"
+                 << "   9. Save to File\n"
+                 << "   0. Save & Exit\n"
+                 << "  --------------------------------------------\n";
+            int choice = Input::readInt("  Enter your choice: ", 0, 9);
+
+            try {
+                switch (choice) {
+                    case 1: addStudent();   break;
+                    case 2: viewAll();      break;
+                    case 3: searchById();   break;
+                    case 4: searchByName(); break;
+                    case 5: updateStudent();break;
+                    case 6: deleteStudent();break;
+                    case 7: sortRecords();  break;
+                    case 8: statistics();   break;
+                    case 9: saveToFile();   break;
+                    case 0:
+                        saveToFile();
+                        cout << "\n  Thank you for using the system. Goodbye!\n";
+                        return;
+                }
+            } catch (const DatabaseException& e) {
+                cout << "  ! Error: " << e.what() << "\n";
+            }
+            pause();
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
+int main() {
+    DatabaseApp app;
+    app.run();
+    return 0;
+}
